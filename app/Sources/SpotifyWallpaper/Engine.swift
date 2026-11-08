@@ -34,6 +34,8 @@ final class Engine {
     /// What each screen's live layer / still last got; a screen is redrawn only when its own key changes.
     private var liveKeys: [CGDirectDisplayID: String] = [:]
     private var stillKeys: [CGDirectDisplayID: String] = [:]
+    /// The last state sent to the windows when every display is switched off (no layer to compare keys with).
+    private var layerlessStateKey = ""
     /// True while the real wallpaper's still is being drawn (ThumbnailService waits for it).
     private(set) var stillRendering = false
     private var generation = 0  // bumped when template code changes on disk
@@ -233,6 +235,22 @@ final class Engine {
         store.template(templateID(for: screen)) ?? store.active
     }
 
+    /// Turns Lirica on or off for one display. Off closes its live layer and gives its own wallpaper back;
+    /// the other screens keep playing.
+    func setEnabled(_ enabled: Bool, for display: CGDirectDisplayID) {
+        store.setEnabled(enabled, for: display)
+        if !enabled {
+            layers[display]?.close()
+            layers.removeValue(forKey: display)
+            liveKeys[display] = nil
+            stillKeys[display] = nil
+            if let screen = NSScreen.screens.first(where: { displayID($0) == display }) {
+                setter.restore(screen)
+            }
+        }
+        tick()
+    }
+
     /// One key per screen; a screen whose key changed needs redrawing. Pure, for tests.
     nonisolated static func screenKeys(trackID: String, templates: [CGDirectDisplayID: String], generation: Int,
                                        epoch: Int) -> [CGDirectDisplayID: String] {
@@ -298,13 +316,22 @@ final class Engine {
         }
         guard loadedTrackID == t.id, !paused, store.active != nil else { return }
 
-        // each screen's template
+        // each screen's template, leaving out screens the user switched off
         var screenTemplates: [CGDirectDisplayID: WallpaperTemplate] = [:]
-        for screen in NSScreen.screens { screenTemplates[displayID(screen)] = template(for: screen) }
+        let enabledScreens = NSScreen.screens.filter { store.isEnabled(displayID($0)) }
+        for screen in enabledScreens { screenTemplates[displayID(screen)] = template(for: screen) }
         let ids = screenTemplates.mapValues(\.id)
+        // forget the keys of screens that are off, so switching one back on redraws it at once
+        liveKeys = liveKeys.filter { ids[$0.key] != nil }
+        stillKeys = stillKeys.filter { ids[$0.key] != nil }
 
         // live layers: only the screens whose template/track/settings changed get new state
         syncLayers(screenTemplates)
+        // a layer for a screen that is now off shouldn't keep drawing behind the desktop
+        for id in layers.keys.filter({ ids[$0] == nil }) {
+            layers[id]?.close()
+            layers.removeValue(forKey: id)
+        }
         let live = Self.screenKeys(trackID: t.id, templates: ids, generation: generation, epoch: liveEpoch)
         let liveChanged = Self.changedScreens(live, from: liveKeys)
         for id in liveChanged {
@@ -317,6 +344,11 @@ final class Engine {
             layer.sendState(jsonString(payload))
         }
         if !liveChanged.isEmpty { onStateChange?() }
+        else if layers.isEmpty {
+            // no live layer to compare keys with (every display is off), but the windows still show the song
+            let key = "\(t.id)|\(liveEpoch)|\(generation)|\(focus)"
+            if key != layerlessStateKey { layerlessStateKey = key; onStateChange?() }
+        }
         let clock = jsonString(["position": t.position, "isPlaying": t.isPlaying, "stamp": pollStamp])
         layers.values.forEach { $0.sendClock(clock); $0.show() }
         updateControlPanels()
@@ -424,7 +456,7 @@ final class Engine {
         defer { stillRendering = false }
         let trackID = track?.id
         for screen in screens {
-            guard let template = template(for: screen) else { continue }
+            guard store.isEnabled(displayID(screen)), let template = template(for: screen) else { continue }
             var url = URLComponents(url: template.url, resolvingAgainstBaseURL: false)!
             url.queryItems = [.init(name: "v", value: String(generation))]
             let id = displayID(screen), size = screen.frame.size
@@ -437,8 +469,9 @@ final class Engine {
             payload["focus"] = focus
             guard let image = await renderers[id]?.render(url: url.url!, payload: payload) else { continue }
             let jpeg = await Task.detached { jpegData(image) }.value
-            // the song may have changed or stopped while drawing
+            // the song may have changed or stopped while drawing, or the screen may have been switched off
             guard let jpeg, !paused, track?.id == trackID, track != nil else { return }
+            guard store.isEnabled(displayID(screen)) else { continue }
             setter.show(jpeg, on: screen)
             if let t = track, screen == NSScreen.screens.first { onStillRendered?(jpeg, screen, t, template.id) }
         }

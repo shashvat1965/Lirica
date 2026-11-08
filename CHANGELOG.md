@@ -2,6 +2,13 @@
 
 All notable changes to Lirica. Versions follow [semantic versioning](https://semver.org).
 
+## 1.7.5 — 2026-11-03
+
+### Added
+- **Turn Lirica off on one or more displays.** In **Displays**, select a screen and use its switch to hide the live
+  wallpaper there. That screen gets your own wallpaper back while the other screens keep playing, and the choice is
+  remembered across reconnects and restarts. Dropping a template on a switched-off screen turns it back on.
+
 ## 1.7.3 — 2026-10-16
 
 ### Added

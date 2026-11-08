@@ -93,10 +93,11 @@ function currentFor(target) {
 }
 function inUse(id, target = S.target) {
   if (!S.displays.length) return S.defaultID === id;
-  if (target === "all") return S.displays.every((d) => d.template === id);
-  return S.displays.find((d) => d.id === target)?.template === id;
+  if (target === "all") return S.displays.some((d) => d.enabled !== false) && S.displays.every((d) => d.enabled === false || d.template === id);
+  const d = S.displays.find((x) => x.id === target);
+  return d != null && d.enabled !== false && d.template === id;
 }
-const onScreens = (id) => S.displays.filter((d) => d.template === id);
+const onScreens = (id) => S.displays.filter((d) => d.enabled !== false && d.template === id);
 /// "In use" badge: on the stage's screen, or (for All screens) on any screen.
 const shownOn = (id) => (S.target === "all" ? onScreens(id).length > 0 || (!S.displays.length && S.defaultID === id) : inUse(id));
 function catKey(t) {
@@ -313,7 +314,7 @@ function renderTarget() {
   const box = $("target");
   if (S.displays.length < 2) { box.hidden = true; return; }
   box.hidden = false;
-  const opts = [["all", "All screens"], ...S.displays.map((d) => [d.id, displayName(d)])];
+  const opts = [["all", "All screens"], ...S.displays.map((d) => [d.id, displayName(d) + (d.enabled === false ? " · Off" : "")])];
   setHTML(box, opts.map(([v, n]) => `<button type="button" data-v="${v}">${esc(n)}</button>`).join(""));
   wireSeg(box);
   setSeg(box, (b) => String(b.dataset.v) === String(S.target));
@@ -347,10 +348,19 @@ function renderStageInsp() {
 
 /// Activate a template on the stage's target (all screens, or one).
 function use(id, target = S.target) {
+  const targetDisplay = target === "all" ? null : S.displays.find((x) => x.id === target);
+  // using a template on a switched-off screen switches it back on
+  if (targetDisplay?.enabled === false) {
+    targetDisplay.enabled = true;
+    post({ type: "displayEnabled", display: targetDisplay.id, enabled: true });
+  } else if (target === "all" && S.displays.length && S.displays.every((d) => d.enabled === false)) {
+    // every screen was off: using a template on "all screens" brings them back
+    for (const d of S.displays) { d.enabled = true; post({ type: "displayEnabled", display: d.id, enabled: true }); }
+  }
   post({ type: "activate", id, display: target === "all" ? null : target });
   // optimistic: the app answers with fresh state
   if (target === "all") { S.defaultID = id; S.displays.forEach((d) => (d.template = id)); S.overrides = {}; }
-  else { const d = S.displays.find((x) => x.id === target); if (d) d.template = id; }
+  else if (targetDisplay) targetDisplay.template = id;
   S.recents = [id, ...S.recents.filter((x) => x !== id)];
   if (id === S.stageID) S.stageFollows = true;
   const where = target === "all" ? (S.displays.length > 1 ? "on every screen" : "") : `on ${displayName(S.displays.find((d) => d.id === target))}`;
@@ -798,8 +808,11 @@ $("sheet").addEventListener("click", (e) => { if (e.target === $("sheet") || e.t
 
 function renderDisplays() {
   const can = $("canvas");
-  const html = S.displays.map((d) => `<button type="button" class="screen ${d.main ? "main" : ""} ${d.id === S.disp ? "on" : ""}" data-d="${d.id}" aria-label="${esc(displayName(d))}, ${esc(tpl(d.template)?.name || "")}">
-      ${thumb(d.template)}<span class="tag"><b>${esc(displayName(d))}</b> · ${esc(tpl(d.template)?.name || "")}</span></button>`).join("");
+  const html = S.displays.map((d) => {
+    const off = d.enabled === false;
+    return `<button type="button" class="screen ${d.main ? "main" : ""} ${off ? "off" : ""} ${d.id === S.disp ? "on" : ""}" data-d="${d.id}" aria-label="${esc(displayName(d))}, ${esc(off ? "wallpaper off" : tpl(d.template)?.name || "")}">
+      ${thumb(d.template)}<span class="tag"><b>${esc(displayName(d))}</b> · ${esc(off ? "Off" : tpl(d.template)?.name || "")}</span></button>`;
+  }).join("");
   setHTML(can, html);
   layoutScreens();
   $("dispHint").textContent = S.displays.length > 1 ? "Drag a template onto a screen, or select a screen and click one." : "Click a template to use it. With another display connected, each screen can have its own.";
@@ -825,26 +838,39 @@ new ResizeObserver(() => { if (S.tab === "displays") layoutScreens(); }).observe
 function renderTray() {
   const d = S.displays.find((x) => x.id === S.disp);
   const ids = [...new Set([...S.favorites, ...S.recents, ...S.templates.map((t) => t.id)])].filter((id) => tpl(id));
-  setHTML($("tray"), ids.map((id) => pickHTML(id, { on: d?.template === id, drag: true, star: false })).join(""));
+  setHTML($("tray"), ids.map((id) => pickHTML(id, { on: d?.enabled !== false && d?.template === id, drag: true, star: false })).join(""));
 }
 function renderDispInsp() {
   const d = S.displays.find((x) => x.id === S.disp), box = $("dispInsp");
   if (!d) { box.innerHTML = ""; return; }
-  const t = tpl(d.template), overridden = S.overrides[String(d.id)] != null || S.displays.some((x) => x.template !== d.template);
+  const t = tpl(d.template), off = d.enabled === false;
+  const overridden = S.overrides[String(d.id)] != null || S.displays.some((x) => x.template !== d.template);
   const res = `${Math.round(d.width)} × ${Math.round(d.height)}${d.main ? " · menu bar" : ""}`;
   renderInspector(box, d.template, {
     noUse: true,
-    head: `<div class="insp-head"><div class="ttl"><h4>${esc(displayName(d))}</h4><span class="lbl">${esc(res)}</span></div></div>`,
-    between: `<div class="disp-tpl">${thumb(d.template)}<div><b>${esc(t?.name || "")}</b><span>Settings apply to this template on every screen</span></div></div>`,
+    head: `<div class="insp-head"><div class="ttl"><h4>${esc(displayName(d))}</h4><span class="lbl">${esc(res)}</span></div>
+      <button type="button" class="tg" role="switch" aria-checked="${!off}" data-dtoggle="${d.id}"
+        aria-label="${esc(`Show Lirica on ${displayName(d)}`)}" title="${off ? "Show Lirica on this display" : "Hide Lirica on this display"}"></button></div>`,
+    between: `<div class="disp-tpl">${thumb(d.template)}<div><b>${esc(t?.name || "")}</b><span>${off ? "Off on this display. Your own wallpaper is showing." : "Settings apply to this template on every screen"}</span></div></div>`,
     footExtra: "",
   });
   // displays-specific footer
   const foot = box.querySelector(".insp-foot");
   foot.innerHTML = S.displays.length > 1
-    ? `<button type="button" class="mbtn wide" data-act="same" ${overridden ? "" : "disabled"}>Same on all screens</button>
-       <span class="note">${overridden ? `Puts ${esc(t?.name || "this template")} on every screen.` : "Every screen shows the same template."}</span>`
+    ? `${off ? "" : `<button type="button" class="mbtn wide" data-act="same" ${overridden ? "" : "disabled"}>Same on all screens</button>`}
+       <span class="note">${off ? "Turn it on to show the live wallpaper here again." : overridden ? `Puts ${esc(t?.name || "this template")} on every screen.` : "Every screen shows the same template."}</span>`
     : `<button type="button" class="mbtn wide" data-act="toStage" data-id="${esc(d.template)}">Customize on the stage</button>`;
 }
+$("dispInsp").addEventListener("click", (e) => {
+  const tg = e.target.closest("[data-dtoggle]");
+  if (!tg) return;
+  const d = S.displays.find((x) => x.id === +tg.dataset.dtoggle);
+  if (!d) return;
+  const enabled = d.enabled === false;
+  d.enabled = enabled;
+  post({ type: "displayEnabled", display: d.id, enabled });
+  renderDisplays();
+});
 function sameOnAll() {
   const d = S.displays.find((x) => x.id === S.disp);
   if (d) use(d.template, "all");
@@ -853,7 +879,7 @@ function assign(displayID, id) {
   const d = S.displays.find((x) => x.id === displayID);
   if (!d || !tpl(id)) return;
   S.disp = displayID;
-  if (d.template === id) { renderDisplays(); return; }
+  if (d.template === id && d.enabled !== false) { renderDisplays(); return; }
   use(id, S.displays.length > 1 ? displayID : "all");
 }
 $("canvas").addEventListener("click", (e) => { const s = e.target.closest(".screen"); if (s) { S.disp = +s.dataset.d; renderDisplays(); } });

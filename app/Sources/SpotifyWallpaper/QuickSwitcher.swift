@@ -185,6 +185,12 @@ final class QuickSwitcher: NSObject, WKScriptMessageHandler, NSWindowDelegate {
         guard let t = store.template(id) else { return }
         let target = onlyScreenUnderMouse && NSScreen.screens.count > 1 ? Self.screenUnderMouse() : nil
         close(restoringFocus: true)
+        // putting a template on a switched-off screen switches it back on; "all screens" brings every one back
+        if let target {
+            if !store.isEnabled(displayID(target)) { engine.setEnabled(true, for: displayID(target)) }
+        } else if !NSScreen.screens.contains(where: { store.isEnabled(displayID($0)) }) {
+            for screen in NSScreen.screens { engine.setEnabled(true, for: displayID(screen)) }
+        }
         store.setActive(id, display: target.map(displayID))
         let detail: String
         if let target { detail = "On \(target.localizedName) only" }
@@ -232,7 +238,8 @@ final class QuickSwitcher: NSObject, WKScriptMessageHandler, NSWindowDelegate {
         for t in store.templates { thumbs[t.id] = thumbURL?(t.id) ?? "sw://app/thumb/\(t.id).jpg?v=\(version)" }
         let mouse = Self.screenUnderMouse()
         let screens: [[String: Any]] = NSScreen.screens.enumerated().map { i, s in
-            ["id": displayID(s), "name": s.localizedName, "template": engine.templateID(for: s), "mouse": s == mouse, "main": i == 0]
+            ["id": displayID(s), "name": s.localizedName, "template": engine.templateID(for: s),
+             "enabled": store.isEnabled(displayID(s)), "mouse": s == mouse, "main": i == 0]
         }
         let track = engine.statePayload(for: nil)["track"] as? [String: Any]
         send(["type": "open", "templates": templates, "recents": store.recentIDs, "screens": screens,

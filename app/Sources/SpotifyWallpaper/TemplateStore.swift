@@ -81,6 +81,7 @@ final class TemplateStore {
     // MARK: per-display templates, recents, favourites
 
     private static let overridesKey = "displayTemplates"  // [display UUID: template id]
+    private static let disabledKey = "disabledDisplays"  // [display UUID] switched off by the user
     private static let recentsKey = "recentTemplates"
     private static let favoritesKey = "favoriteTemplates"
     static let maxRecents = 12
@@ -120,6 +121,30 @@ final class TemplateStore {
 
     private var savedOverrides: [String: String] {
         defaults.dictionary(forKey: Self.overridesKey) as? [String: String] ?? [:]
+    }
+
+    // MARK: displays switched off
+
+    /// Switched-off displays, remembered by UUID so the choice survives reconnects and reboots.
+    private var savedDisabled: Set<String> {
+        get { Set(defaults.stringArray(forKey: Self.disabledKey) ?? []) }
+        set { defaults.set(Array(newValue), forKey: Self.disabledKey) }
+    }
+
+    /// False when the user turned Lirica off for this screen: no live layer and no wallpaper still.
+    func isEnabled(_ display: CGDirectDisplayID) -> Bool {
+        guard let uuid = displayUUID(display) else { return true }
+        return !savedDisabled.contains(uuid)
+    }
+
+    /// Turns Lirica on or off for one display. Other screens keep their own state.
+    func setEnabled(_ enabled: Bool, for display: CGDirectDisplayID) {
+        guard let uuid = displayUUID(display) else { return }
+        var saved = savedDisabled
+        if enabled { saved.remove(uuid) } else { saved.insert(uuid) }
+        savedDisabled = saved
+        onActiveChanged?()
+        NotificationCenter.default.post(name: Self.activeChangedNotification, object: self)
     }
 
     /// Most recently applied first; templates that were deleted are skipped.

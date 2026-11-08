@@ -154,6 +154,10 @@ final class HomeWindowController: NSWindowController, WKScriptMessageHandler, NS
             store.setActive(id, display: display)
             engine.invalidate()
             pushState()
+        case "displayEnabled":
+            guard let display = (body["display"] as? NSNumber).map({ CGDirectDisplayID($0.uint32Value) }) else { return }
+            engine.setEnabled(body["enabled"] as? Bool ?? true, for: display)
+            pushState()
         case "setParam":
             guard let key = body["key"] as? String, let value = body["value"] else { return }
             store.setValue(id, key: key, value: value)
@@ -314,6 +318,7 @@ final class HomeWindowController: NSWindowController, WKScriptMessageHandler, NS
                 // top-left origin, in points, relative to the menu-bar screen
                 "x": s.frame.minX, "y": top - s.frame.maxY, "width": s.frame.width, "height": s.frame.height,
                 "scale": s.backingScaleFactor, "template": engine.templateID(for: s),
+                "enabled": store.isEnabled(displayID(s)),
             ]
         }
         var overrides: [String: String] = [:]

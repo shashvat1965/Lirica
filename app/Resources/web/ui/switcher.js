@@ -81,7 +81,7 @@ function score(query, fields) {
 
 // ---------- rows ----------
 
-function usedOn(id) { return S.screens.filter((s) => s.template === id); }
+function usedOn(id) { return S.screens.filter((s) => s.enabled !== false && s.template === id); }
 
 function build(resetSel, keepKey) {
   const q = S.query.trim();
@@ -146,9 +146,9 @@ function hookThumbs(root) {
 }
 
 function templateRow(t, i) {
-  const used = usedOn(t.id);
+  const used = usedOn(t.id), on = S.screens.filter((s) => s.enabled !== false).length;
   let where = "";
-  if (used.length && used.length === S.screens.length) where = " · <b>On your desktop</b>";
+  if (used.length && used.length === on) where = " · <b>On your desktop</b>";
   else if (used.length) where = ` · <b>On ${esc(used.map((s) => s.name).join(", "))}</b>`;
   return `<div class="row" role="option" id="r${i}" data-i="${i}">${thumb(t)}<div><div class="nm">${esc(t.name)}</div>` +
     `<div class="sub">${esc(t.category)}${where}</div></div><div class="end">${t.favorite ? '<span class="star" aria-label="Favourite">★</span>' : ""}<span class="ret">↩</span></div></div>`;
@@ -187,7 +187,7 @@ function renderPreview() {
   }
   const t = r.t;
   const screens = S.screens.length > 1 ? `<div class="screens"><div class="lbl">Screens</div>${S.screens.map((s) =>
-    `<div class="scr${s.template === t.id ? " use" : ""}">${ICON.screen}<span>${esc(s.name)}</span>${s.mouse ? '<span class="here">pointer</span>' : ""}</div>`).join("")}</div>`
+    `<div class="scr${s.enabled !== false && s.template === t.id ? " use" : ""}">${ICON.screen}<span>${esc(s.name)}</span>${s.enabled === false ? '<span class="here">off</span>' : s.mouse ? '<span class="here">pointer</span>' : ""}</div>`).join("")}</div>`
     : `<div class="screens"><div class="scr${usedOn(t.id).length ? " use" : ""}">${ICON.screen}<span>${usedOn(t.id).length ? "On your desktop now" : "Not on your desktop"}</span></div></div>`;
   box.innerHTML = `${thumb(t, true)}<div><h4>${esc(t.name)}</h4><div class="cat" style="--c:${CAT_COLOR[t.category] || "#444"}"><i></i>${esc(t.category)}${t.favorite ? " · ★ Favourite" : ""}</div></div>` +
     `<p>${esc(t.description || "")}</p>${screens}`;

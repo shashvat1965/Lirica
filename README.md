@@ -38,6 +38,7 @@ with sliders or rewrite completely.
   changes on its exact timestamp, with optional karaoke-style fill.
 - **Animated:** lyrics scroll and rise in, the waveform moves, gradients drift. You can cap the frame rate to save battery.
 - **Every Space, every monitor.** Each display gets a frame drawn at its own size and aspect ratio (laptop and ultrawide).
+  Switch Lirica off on any display in **Displays** to leave that screen showing your own wallpaper.
 - **The real wallpaper stays in sync.** On every track change the app also sets your actual wallpaper to a still of
   the song, so the lock screen and Mission Control match. When you quit, or nothing is playing, your own wallpaper
   comes back.
@@ -117,7 +118,7 @@ Everyday actions are in the ♪ menu bar icon; app-wide options are in **Setting
 
 | Menu item | What it does |
 |---|---|
-| **Open Lirica… (⌘O)** | Home: a live preview with each template's settings, a shelf of recent and favourite templates, the full gallery, a template per display, the History Wall, and lyrics source and timing. Also opens when you open the app again from Finder or the Dock |
+| **Open Lirica… (⌘O)** | Home: a live preview with each template's settings, a shelf of recent and favourite templates, the full gallery, a template per display (or Lirica off on a display), the History Wall, and lyrics source and timing. Also opens when you open the app again from Finder or the Dock |
 | **Quick Switcher… (⌃⌥⌘W)** | Switch the template on the current display without opening Home |
 | **Share Lyric Card (⌃⌥⌘L)** | Save and copy the current lyric in the active template's style |
 | **Focus Mode (⌃⌥⌘F)** | Hide or restore lyrics on every display |

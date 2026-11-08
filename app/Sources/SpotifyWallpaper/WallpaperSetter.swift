@@ -27,7 +27,8 @@ final class WallpaperSetter {
     }
 
     func show(_ jpeg: Data, on screen: NSScreen) {
-        if !showing { rememberOriginals() }
+        // A screen switched off in between may now show a wallpaper the user chose; keep that as its original.
+        rememberOriginals()
         showing = true
         let id = displayID(screen)
         latest[id] = jpeg
@@ -119,28 +120,44 @@ final class WallpaperSetter {
         return !ours.contains { url.path.hasPrefix($0) }
     }
 
+    /// Puts the user's own wallpaper back on one screen, e.g. after switching Lirica off for that display.
+    /// Does nothing if Lirica never drew a frame there.
+    func restore(_ screen: NSScreen) {
+        let id = displayID(screen)
+        guard latest[id] != nil else { return }
+        latest[id] = nil
+        guard showing, let path = originals[String(id)] ?? originals.values.first else { return }
+        restoreWallpaper(on: screen, id: id, to: path)
+    }
+
     /// Puts the user's own wallpaper back. Spaces we can't reach right now still point at our two frame
     /// files, so turn both into symlinks to the original. Creating a link does not read the source image, avoiding
     /// a surprising Downloads/Pictures permission prompt when Lirica quits.
     func restore() {
         guard showing else { return }
         showing = false
+        // only screens Lirica drew on: a display switched off since then may have a wallpaper the user chose
+        let touched = Set(latest.keys)
         latest.removeAll()
         held.removeAll()  // the slots become symlinks below
         let o = originals
         for screen in NSScreen.screens {
             let id = displayID(screen)
-            guard let path = o[String(id)] ?? o.values.first else { continue }
-            for s in 0...1 {
-                let frame = frameURL(id, s)
-                try? FileManager.default.removeItem(at: frame)
-                try? FileManager.default.createSymbolicLink(atPath: frame.path, withDestinationPath: path)
-            }
-            let current = NSWorkspace.shared.desktopImageURL(for: screen)?.standardizedFileURL
-            var next = (slot[id] ?? 0) ^ 1
-            if frameURL(id, next).standardizedFileURL == current { next ^= 1 }
-            slot[id] = next
-            try? NSWorkspace.shared.setDesktopImageURL(frameURL(id, next), for: screen, options: [:])
+            guard touched.contains(id), let path = o[String(id)] ?? o.values.first else { continue }
+            restoreWallpaper(on: screen, id: id, to: path)
         }
+    }
+
+    private func restoreWallpaper(on screen: NSScreen, id: CGDirectDisplayID, to path: String) {
+        for s in 0...1 {
+            let frame = frameURL(id, s)
+            try? FileManager.default.removeItem(at: frame)
+            try? FileManager.default.createSymbolicLink(atPath: frame.path, withDestinationPath: path)
+        }
+        let current = NSWorkspace.shared.desktopImageURL(for: screen)?.standardizedFileURL
+        var next = (slot[id] ?? 0) ^ 1
+        if frameURL(id, next).standardizedFileURL == current { next ^= 1 }
+        slot[id] = next
+        try? NSWorkspace.shared.setDesktopImageURL(frameURL(id, next), for: screen, options: [:])
     }
 }

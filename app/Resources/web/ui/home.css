@@ -301,6 +301,7 @@ input[type="range"]:focus-visible { outline-offset: 4px; border-radius: 4px; }
 .screen .th { height: 100%; aspect-ratio: auto; border-radius: 5px; box-shadow: none; }
 .screen.main .th::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 4%; min-height: 3px; background: rgb(255 255 255 / 0.22); z-index: 1; }
 .screen.on { box-shadow: 0 0 0 2.5px var(--focus), 0 18px 34px -12px rgb(0 0 0 / 0.7); }
+.screen.off .th { opacity: 0.3; filter: grayscale(1); }
 .screen.drop { box-shadow: 0 0 0 3px #fff, 0 18px 34px -12px rgb(0 0 0 / 0.7); }
 .screen:focus-visible { box-shadow: 0 0 0 2.5px var(--focus), 0 0 0 5px rgb(143 151 255 / 0.35); }
 .screen .tag { position: absolute; left: 2px; right: -40px; top: calc(100% + 9px); font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

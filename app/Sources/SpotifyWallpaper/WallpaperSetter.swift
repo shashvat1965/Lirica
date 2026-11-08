@@ -6,35 +6,54 @@ import AppKit
 /// change and `reapply()` runs the instant you switch Spaces: whichever Space you're looking at is current.
 /// The API needs a file URL, and re-setting a path a Space already shows doesn't refresh it, so each screen
 /// alternates between two files.
+///
+/// WallpaperAgent caches a large render per path and modification time, so a file is only written when it doesn't
+/// already hold the latest frame: switching Spaces just points the Space at a slot that does.
 @MainActor
 final class WallpaperSetter {
     private let dir: URL
     private var latest: [CGDirectDisplayID: Data] = [:]
     private var slot: [CGDirectDisplayID: Int] = [:]
+    /// Bumped per new frame; `held` records which frame each slot file holds, so unchanged files aren't rewritten.
+    private var generation: [CGDirectDisplayID: Int] = [:]
+    private var held: [CGDirectDisplayID: [Int: Int]] = [:]
+    private var pruneScheduled = false
     private(set) var showing = false
     private let defaults = UserDefaults.standard
 
-    init(paths: Paths) { dir = paths.frames }
+    init(paths: Paths) {
+        dir = paths.frames
+        WallpaperCachePruner.schedule(frames: dir)  // leftovers from earlier runs
+    }
 
     func show(_ jpeg: Data, on screen: NSScreen) {
         if !showing { rememberOriginals() }
         showing = true
-        latest[displayID(screen)] = jpeg
-        write(screen)
+        let id = displayID(screen)
+        latest[id] = jpeg
+        generation[id, default: 0] += 1
+        apply(screen)
     }
 
     func reapply() {
         guard showing else { return }
-        for screen in NSScreen.screens { write(screen) }
+        for screen in NSScreen.screens { apply(screen) }
     }
 
-    private func write(_ screen: NSScreen) {
+    /// Points the current Space at a slot holding the latest frame other than the one it shows, writing that slot
+    /// only if it holds an older frame. A Space showing the stale slot just switches paths, no write; one showing
+    /// the fresh slot may not have been refreshed since it was written, so it gets the other slot, written at most
+    /// once per frame.
+    private func apply(_ screen: NSScreen) {
         let id = displayID(screen)
-        guard let data = latest[id] else { return }
+        guard let data = latest[id], let gen = generation[id] else { return }
         let current = NSWorkspace.shared.desktopImageURL(for: screen)?.standardizedFileURL
-        var next = (slot[id] ?? 0) ^ 1
-        if frameURL(id, next).standardizedFileURL == current { next ^= 1 }  // this Space already shows that file
-        slot[id] = next
+        let shown = (0...1).first { frameURL(id, $0).standardizedFileURL == current }
+        if let fresh = (0...1).first(where: { $0 != shown && held[id]?[$0] == gen }) {
+            set(frameURL(id, fresh), on: screen, slot: fresh)
+            return
+        }
+        let next = shown.map { $0 ^ 1 } ?? ((slot[id] ?? 0) ^ 1)
         let url = frameURL(id, next)
         do {
             // restore() leaves symlinks here so every Space can show the user's wallpaper without Lirica reading a
@@ -43,9 +62,31 @@ final class WallpaperSetter {
                 try FileManager.default.removeItem(at: url)
             }
             try data.write(to: url, options: .atomic)
+            held[id, default: [:]][next] = gen
+        } catch {
+            held[id]?[next] = nil
+            NSLog("SpotifyWallpaper: couldn't set wallpaper: \(error)")
+            return
+        }
+        set(url, on: screen, slot: next)
+        schedulePrune()
+    }
+
+    private func set(_ url: URL, on screen: NSScreen, slot s: Int) {
+        slot[displayID(screen)] = s
+        do {
             try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [:])
         } catch {
             NSLog("SpotifyWallpaper: couldn't set wallpaper: \(error)")
+        }
+    }
+
+    /// At most one prune a minute, a minute after a write so WallpaperAgent has rendered the new frame.
+    private func schedulePrune() {
+        guard !pruneScheduled else { return }
+        pruneScheduled = true
+        WallpaperCachePruner.schedule(frames: dir, after: 60) { [weak self] in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.pruneScheduled = false } }
         }
     }
 
@@ -85,6 +126,7 @@ final class WallpaperSetter {
         guard showing else { return }
         showing = false
         latest.removeAll()
+        held.removeAll()  // the slots become symlinks below
         let o = originals
         for screen in NSScreen.screens {
             let id = displayID(screen)
